@@ -1,0 +1,33 @@
+进度跟踪（作为对话记忆落盘）
+更新时间：2026-03-18
+
+已完成
+- PRD.md：前端需求文档（V1.3），已明确“免登录可提问 + 重新打开记忆对话”（Visitor ID + 本地恢复）
+- FLOW.md：用户流程与路由清单（Flow ID、触发条件、步骤序列、决策点、成功/错误处理、屏幕清单与路由规则）
+- TECH_STACK.md：技术栈与版本锁定清单（依赖/工具链/API 契约版本/卡片 schema/错误码/浏览器基线）
+- agent.md：工作协议与记忆设定（要求每次任务先读文档、禁止猜测流程/路由/版本）
+- .trae/rules/global.md：全局规则已落盘（开始前必须读 agent.md；结束后必须更新 progress.txt）
+- PRD.md：新增多语言（i18n）要求（zh-CN/en-US、语言记忆、Element Plus locale、格式化规则、请求携带 locale）
+- 范围收敛：当前版本仅实现“对话能力”，暂不实现课程/讲师卡片与线索收集表单（已同步 PRD/FLOW/TECH_STACK/agent）
+- demo-chat.html：单文件对话 Demo（悬浮挂件、历史恢复、流式回复模拟、转人工切换、导出）
+- demo-chat.html：已调整为主站橙白商务色调（品牌橙按钮、白底卡片、浅橙用户气泡、统一输入与按钮状态样式）
+- UI.md：新增界面风格与排版规范文档（色彩 Token、排版、布局、组件、A11y、禁止项、验收清单）
+- demo-chat.html：按最新要求精简为仅保留悬浮 div 按钮（咨询）与点击后弹窗窗口
+- 文档形态统一：智能客服调整为“主界面智能客服按钮触发的悬浮弹窗”，并同步 PRD/FLOW/TECH_STACK/UI/agent 一致性
+- 前端工程初始化：Vite + Vue3 + TypeScript + Pinia + Element Plus + Router + ESLint 配置落地
+- 对话主流程落地：主界面入口按钮、悬浮弹窗双栏布局、AI/HUMAN 模式切换、快捷 Prompt、输入工具栏、消息反馈
+- 会话能力落地：Visitor ID 本地生成与持久化、会话快照恢复、历史上拉分页模拟、基础富文本渲染（链接/换行/列表）
+- 流式能力落地：SSE 协议解析 + mock 回退、打字机增量渲染、连接状态展示、错误降级与重试入口
+- 可选卡片能力：contact_card / csat_card 的 zod schema 校验与渲染降级
+- i18n 落地：zh-CN / en-US 文案、语言记忆、Element Plus locale 跟随切换
+- 导出能力落地：聊天记录导出 txt，失败时降级复制纯文本
+- 工程验证完成：lint（0 error, 80 warning）/ typecheck 通过 / build 通过 / 本地预览可打开
+- 对话 UI 精修：消息左右对齐与头像/时间信息、头部连接状态胶囊、右侧信息卡片化、工具栏改为 Element Plus Icon 并与发送按钮同一行、支持在人工/智能间切换
+
+进行中
+- 无
+
+接下来
+- 按后端联调结果替换 mockStream，实现真实 `/api/chat/stream` 与转人工接口
+- 根据 lint 告警策略决定是否收敛 Vue 模板格式告警（当前不影响构建）
+- 补充人工离线/排队与满意度提交的真实接口串联

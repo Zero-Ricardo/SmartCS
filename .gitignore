@@ -1,1 +1,158 @@
-.env.example
+# ===== Python =====
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# ===== Virtual Environments =====
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ===== IDE =====
+# PyCharm
+.idea/
+
+# VSCode
+.vscode/
+
+# Sublime Text
+*.sublime-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# ===== Node.js / 前端 =====
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 前端构建产物（Docker 构建时生成，不需要提交）
+# dist/  # 如果需要可以取消注释
+
+# ===== 敏感配置 =====
+# 环境变量文件（包含 API Key 等敏感信息）
+.env
+.env.local
+.env.*.local
+
+# 密钥文件
+*.pem
+*.key
+*.crt
+secrets/
+
+# ===== 数据库 =====
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== Docker =====
+# Docker 数据卷（本地开发）
+docker-data/
+
+# ===== 操作系统 =====
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# ===== 项目特定 =====
+# 原始文档目录
+pure_md/
+参考文档/
+
+# 临时文件
+*.tmp
+*.temp
+*.log
+*.bak
+
+# 测试结果
+test_result.txt
+
+# 个人笔记
+我的想法.txt
+process.md
+进度.md
+struct.txt
+CLAUDE.md
+前后端对接思路.md
+
+# 数据文件
+golden_dataset.jsonl
+数据样例和进一步规划.txt
+控制变量/
+docs/
+
+# ===== 其他 =====
+# 日志文件
+logs/
+*.log
+
+# 缓存
+.cache/
+.temp/
