@@ -24,7 +24,7 @@ export interface Citation {
 }
 
 export interface ChatMessage {
-  id: string;
+  id: string;                    // 消息 ID（前端生成，后端使用）
   role: SenderRole;
   content: string;
   createdAt: string;
@@ -33,6 +33,8 @@ export interface ChatMessage {
   card?: ChatCard;
   citations?: Citation[];
   error?: string;
+  originalContent?: string;      // 用户原始发送的内容，用于重试
+  userMessageId?: string;        // 对应的用户消息 ID，用于重试
 }
 
 export interface ChatSnapshot {

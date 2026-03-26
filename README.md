@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # SmartCS AI Engine
 
 一个基于 RAG（检索增强生成）的智能客服微服务引擎，提供流式问答、会话管理和知识库检索功能。
@@ -341,15 +340,3 @@ MIT License
 3. 提交更改 (`git commit -m 'Add amazing feature'`)
 4. 推送到分支 (`git push origin feature/amazing-feature`)
 5. 创建 Pull Request
-=======
-# SmartCS
-This is my first ai project
-
-##
-waiting my next upgrade
-
-##
-a upgrade in branch ricardo
-a upgrade in branch ricardo
-a upgrade in branch ricardo
->>>>>>> ccf230fdb4c35d76fc8c4248ef386bb338f94a2c

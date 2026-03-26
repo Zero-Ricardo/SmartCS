@@ -3,6 +3,7 @@
 只负责接客（接收请求、返回响应），不写 AI 逻辑
 """
 import uuid
+from datetime import datetime
 from typing import Optional, List, AsyncGenerator
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
@@ -11,13 +12,15 @@ from sqlalchemy import select, update
 
 from app.core.database import get_db
 from app.core.security import verify_internal_secret
-from app.models import ChatSession, ChatMessage, MessageRole
+from app.models import ChatSession, ChatMessage, ChatFeedback, MessageRole
 from app.schemas.chat import (
     SessionResponse,
     BindRequest,
     BindResponse,
     ChatStreamRequest,
     MessageResponse,
+    FeedbackRequest,
+    FeedbackResponse,
 )
 
 router = APIRouter(
@@ -78,6 +81,7 @@ async def get_messages(
             role=m.role.value,
             content=m.content,
             citations=m.citations,
+            feedback=m.feedback.feedback_type if m.feedback else None,
             created_at=m.created_at.isoformat(),
         )
         for m in messages
@@ -120,6 +124,60 @@ async def bind_guest_to_user(
     )
 
 
+@router.post("/feedback", response_model=FeedbackResponse)
+async def submit_feedback(
+    request: FeedbackRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    提交消息反馈（有用/无用）
+
+    - 仅支持 assistant 消息
+    - feedback_type 只能是 "up" 或 "down"
+    - 支持可选的 reason 字段
+    """
+    # 验证反馈类型
+    if request.feedback_type not in ("up", "down"):
+        return FeedbackResponse(success=False, message="无效的反馈类型")
+
+    # 查找消息
+    result = await db.execute(
+        select(ChatMessage).where(ChatMessage.id == request.message_id)
+    )
+    message = result.scalar_one_or_none()
+
+    if not message:
+        return FeedbackResponse(success=False, message="消息不存在")
+
+    # 只有 assistant 消息才能反馈
+    if message.role != MessageRole.ASSISTANT:
+        return FeedbackResponse(success=False, message="只能对 AI 回复进行反馈")
+
+    # 查找是否已有反馈记录
+    existing_feedback = await db.execute(
+        select(ChatFeedback).where(ChatFeedback.message_id == request.message_id)
+    )
+    feedback_record = existing_feedback.scalar_one_or_none()
+
+    if feedback_record:
+        # 更新已有反馈
+        feedback_record.feedback_type = request.feedback_type
+        feedback_record.reason = request.reason
+    else:
+        # 创建新反馈记录
+        feedback_record = ChatFeedback(
+            message_id=request.message_id,
+            session_id=message.session_id,
+            feedback_type=request.feedback_type,
+            reason=request.reason,
+        )
+        db.add(feedback_record)
+
+    await db.commit()
+
+    return FeedbackResponse(success=True, message="反馈提交成功")
+
+
 @router.post("/stream")
 async def chat_stream(
     request: ChatStreamRequest,
@@ -131,6 +189,7 @@ async def chat_stream(
     - 支持创建新会话或继续已有会话
     - 使用 LangGraph 进行意图识别 → 问题改写 → 检索 → 生成
     - 返回 SSE 多事件流：chunk（文本块）+ citations（引用）
+    - 消息 ID 由前端生成，后端直接使用
     """
     from app.agent.graph import stream_agent
     from app.services.db_service import db_service
@@ -149,8 +208,9 @@ async def chat_stream(
         db.add(new_session)
         await db.commit()
 
-    # 保存用户消息
+    # 保存用户消息（使用前端传来的 ID）
     user_message = ChatMessage(
+        id=request.user_message_id,
         session_id=session_id,
         role=MessageRole.USER,
         content=request.query,
@@ -194,9 +254,10 @@ async def chat_stream(
                 import json
                 yield f'event: citations\ndata: {json.dumps(event["citations"])}\n\n'
             elif event["type"] == "done":
-                # 流结束，保存 AI 回复到数据库
+                # 流结束，保存 AI 回复到数据库（使用前端预分配的 ID）
                 if full_response:
                     assistant_message = ChatMessage(
+                        id=request.ai_message_id,
                         session_id=session_id,
                         role=MessageRole.ASSISTANT,
                         content=full_response,

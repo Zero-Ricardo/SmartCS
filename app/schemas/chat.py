@@ -1,6 +1,6 @@
 """
 聊天相关的 Pydantic 数据模型
-用于规范 Java 端传来的 JSON 格式，以及流式响应��数据包格式
+用于规范 Java 端传来的 JSON 格式，以及流式响应��据包格式
 """
 from typing import Optional, List
 from pydantic import BaseModel, Field
@@ -14,6 +14,8 @@ class ChatStreamRequest(BaseModel):
     user_id: Optional[str] = Field(None, description="用户 ID")
     query: str = Field(..., description="用户问题")
     session_id: Optional[str] = Field(None, description="会话 ID（可选，不传则新建）")
+    user_message_id: str = Field(..., description="前端生成的用户消息 ID")
+    ai_message_id: str = Field(..., description="前端预分配的 AI 消息 ID")
 
 
 class BindRequest(BaseModel):
@@ -32,6 +34,13 @@ class KnowledgeDocument(BaseModel):
 class KnowledgeIngestRequest(BaseModel):
     """知识库导入请求"""
     documents: List[KnowledgeDocument] = Field(..., description="文档列表")
+
+
+class FeedbackRequest(BaseModel):
+    """反馈请求"""
+    message_id: str = Field(..., description="消息 ID（前端生成的 UUID）")
+    feedback_type: str = Field(..., description="反馈类型: up 或 down")
+    reason: Optional[str] = Field(None, description="反馈理由（可选）")
 
 
 # ====== 响应模型 ======
@@ -62,6 +71,12 @@ class KnowledgeIngestResponse(BaseModel):
     message: str
 
 
+class FeedbackResponse(BaseModel):
+    """反馈响应"""
+    success: bool
+    message: str
+
+
 class MessageResponse(BaseModel):
     """消息响应"""
     id: str
@@ -69,6 +84,7 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     citations: Optional[List[dict]] = None
+    feedback: Optional[str] = None  # 当前消息的反馈状态
     created_at: str
 
 

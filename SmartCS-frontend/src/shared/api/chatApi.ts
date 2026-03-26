@@ -14,6 +14,8 @@ export interface SendMessageParams {
   sessionId: string | null;
   pageContext: string;
   locale: AppLocale;
+  userMessageId: string;    // 前端生成的用户消息 ID
+  aiMessageId: string;      // 前端预分配的 AI 消息 ID
 }
 
 export interface Citation {
@@ -110,7 +112,9 @@ export const sendMessageStream = async (params: SendMessageParams, handlers: Str
       body: JSON.stringify({
         query: params.content,
         guest_id: params.visitorId,
-        session_id: requestSessionId
+        session_id: requestSessionId,
+        user_message_id: params.userMessageId,
+        ai_message_id: params.aiMessageId
       })
     });
 
@@ -178,5 +182,32 @@ export const sendMessageStream = async (params: SendMessageParams, handlers: Str
   } catch {
     handlers.onError();
     return { sessionId: requestSessionId } satisfies StreamResult;
+  }
+};
+
+
+/**
+ * 提交消息反馈（有用/无用）
+ */
+export const submitFeedback = async (messageId: string, feedbackType: "up" | "down", reason?: string): Promise<boolean> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/internal/chat/feedback`, {
+      method: "POST",
+      headers: buildHeaders(),
+      body: JSON.stringify({
+        message_id: messageId,
+        feedback_type: feedbackType,
+        reason: reason
+      })
+    });
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const result = await response.json();
+    return result.success === true;
+  } catch {
+    return false;
   }
 };

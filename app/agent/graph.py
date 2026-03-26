@@ -89,13 +89,18 @@ async def stream_agent(
         ])
 
     # 2. 分析节点（极简规则路由，<1ms）
+    # 从 query 中提取真正的用户问题（去掉引用部分 ">" 开头的行）
+    import re
+    lines = query.split('\n')
+    real_query = '\n'.join(line for line in lines if not line.strip().startswith('>')).strip()
+
     analyze_result = await analyze_node({
-        "query": query,
+        "query": real_query,
         "history": history_text,
     })
 
     intent = analyze_result.get("intent", "need_rag")
-    rewritten_query = analyze_result.get("rewritten_query", query)
+    rewritten_query = analyze_result.get("rewritten_query", real_query)
 
     # 3. 条件分支：是否需要检索
     context_docs = []
@@ -105,7 +110,8 @@ async def stream_agent(
         except Exception:
             context_docs = []
 
-    # 4. 构建生成 prompt
+    # 4. 构建生成 prompt（使用完整 query，包含引用部分）
+    # 5. 构建消息历史（暂时禁用，方便后续加回）
     context = "\n\n".join([doc["content"] for doc in context_docs])
 
     if intent == "need_rag" and context_docs:

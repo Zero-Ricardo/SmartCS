@@ -25,9 +25,14 @@ export const useChatStore = defineStore("chat", () => {
     quotedMessage.value = "";
   };
 
-  const appendMessage = (payload: Omit<ChatMessage, "id" | "createdAt">) => {
+  /**
+   * 添加消息
+   * @param payload 消息内容
+   * @param customId 可选的自定义 ID（用于前端生成 ID 的场景）
+   */
+  const appendMessage = (payload: Omit<ChatMessage, "id" | "createdAt">, customId?: string) => {
     const message: ChatMessage = {
-      id: createId(),
+      id: customId ?? createId(),
       createdAt: dayjs().toISOString(),
       ...payload
     };
@@ -45,8 +50,22 @@ export const useChatStore = defineStore("chat", () => {
     persist();
   };
 
-  const setFeedback = (id: string, feedback: "up" | "down") => {
+  /**
+   * 设置反馈并同步到后端
+   * @param id 消息 ID（前端生成的 UUID，后端也使用此 ID）
+   * @param feedback 反馈类���
+   * @param reason 反馈理由（可选）
+   */
+  const setFeedback = async (id: string, feedback: "up" | "down", reason?: string) => {
     patchMessage(id, { feedback });
+
+    // 同步到后端
+    try {
+      const { submitFeedback } = await import("@/shared/api/chatApi");
+      await submitFeedback(id, feedback, reason);
+    } catch (e) {
+      console.error("反馈同步失败", e);
+    }
   };
 
   const deleteMessage = (id: string) => {
@@ -129,6 +148,7 @@ export const useChatStore = defineStore("chat", () => {
     loadOlder,
     quotedMessage,
     setQuote,
-    clearQuote
+    clearQuote,
+    createId  // 导出 createId 供组件使用
   };
 });

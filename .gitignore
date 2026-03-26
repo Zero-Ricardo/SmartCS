@@ -139,11 +139,14 @@ test_result.txt
 process.md
 进度.md
 struct.txt
+CLAUDE.md
+前后端对接思路.md
 
 # 数据文件
 golden_dataset.jsonl
 数据样例和进一步规划.txt
 控制变量/
+docs/
 
 # ===== 其他 =====
 # 日志文件

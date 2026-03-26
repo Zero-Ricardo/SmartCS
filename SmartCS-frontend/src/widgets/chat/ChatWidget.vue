@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { ChatDotRound, Close, Download, MagicStick, Upload, UserFilled, Delete, DocumentCopy, ChatSquare, Link, TopRight } from "@element-plus/icons-vue";
+import { ChatDotRound, Close, Download, MagicStick, Upload, UserFilled, Delete, DocumentCopy, ChatSquare, Link, TopRight, RefreshRight } from "@element-plus/icons-vue";
 import { useClipboard, useNetwork, useDraggable } from "@vueuse/core";
 import dayjs from "dayjs";
 import { useChatStore } from "@/entities/chat/model/useChatStore";
@@ -74,22 +74,27 @@ const closeWidget = () => {
   opened.value = false;
 };
 
-const pushUserMessage = (text: string) => {
-  const payload: Omit<ChatMessage, "id" | "createdAt"> = { role: "user", content: text };
+const pushUserMessage = (text: string, customId: string) => {
+  const originalContent = text;  // 保存原始内容
+  let displayContent = text;
   if (store.quotedMessage) {
-    payload.content = `> ${store.quotedMessage}\n\n${text}`;
+    displayContent = `> ${store.quotedMessage}\n\n${text}`;
     store.clearQuote();
   }
-  
-  return store.appendMessage(payload);
+
+  return store.appendMessage({
+    role: "user",
+    content: displayContent,
+    originalContent: originalContent
+  }, customId);
 };
 
-const pushAiContainer = () => {
+const pushAiContainer = (customId: string) => {
   return store.appendMessage({
     role: store.serviceMode === "AI" ? "ai" : "human",
     content: "",
     pending: true
-  });
+  }, customId);
 };
 
 const sendMessage = async (preset?: string) => {
@@ -98,11 +103,19 @@ const sendMessage = async (preset?: string) => {
     return;
   }
   errorText.value = "";
-  pushUserMessage(content);
+
+  // 前端预生成消息 ID（Client-Generated UUID）
+  const userMessageId = store.createId();
+  const aiMessageId = store.createId();
+
+  // 添加用户消息（使用预生成的 ID）
+  pushUserMessage(content, userMessageId);
   input.value = "";
   streaming.value = true;
   store.setConnection("RECONNECTING");
-  const aiId = pushAiContainer();
+
+  // 添加 AI 消息容器（使用预生成的 ID）
+  pushAiContainer(aiMessageId);
   await ensureBottom();
 
   const streamResult = await sendMessageStream(
@@ -111,16 +124,18 @@ const sendMessage = async (preset?: string) => {
       visitorId: store.visitorId,
       sessionId: store.sessionId,
       pageContext: "training-home",
-      locale: locale.value
+      locale: locale.value,
+      userMessageId,
+      aiMessageId
     },
     {
       onToken(token) {
-        const current = store.messages.find((item) => item.id === aiId)?.content ?? "";
-        store.patchMessage(aiId, { content: `${current}${token}` });
+        const current = store.messages.find((item) => item.id === aiMessageId)?.content ?? "";
+        store.patchMessage(aiMessageId, { content: `${current}${token}` });
         ensureBottom();
       },
       onCard(card) {
-        store.patchMessage(aiId, { card });
+        store.patchMessage(aiMessageId, { card });
       },
       onSession(sessionId) {
         if (sessionId && sessionId !== store.sessionId) {
@@ -128,15 +143,100 @@ const sendMessage = async (preset?: string) => {
         }
       },
       onCitations(citations) {
-        store.patchMessage(aiId, { citations });
+        store.patchMessage(aiMessageId, { citations });
       },
       onDone() {
-        store.patchMessage(aiId, { pending: false });
+        // 保存对应的用户消息 ID，用于重试
+        store.patchMessage(aiMessageId, { pending: false, userMessageId: userMessageId });
         store.setConnection("ONLINE");
         streaming.value = false;
       },
       onError() {
-        store.patchMessage(aiId, { pending: false, error: "NETWORK_ERROR" });
+        store.patchMessage(aiMessageId, { pending: false, error: "NETWORK_ERROR" });
+        store.setConnection("OFFLINE");
+        errorText.value = "NETWORK_ERROR";
+        streaming.value = false;
+      }
+    }
+  );
+  await ensureBottom();
+};
+
+// 重试指定消息
+const retryMessage = async (aiMessageId: string) => {
+  // 找到对应的 AI 消息
+  const aiMessage = store.messages.find((item) => item.id === aiMessageId);
+  if (!aiMessage) return;
+
+  // 从 AI 消息的 userMessageId 找到用户消息
+  const userMessageId = (aiMessage as any).userMessageId;
+  const userMessage = userMessageId ? store.messages.find((item) => item.id === userMessageId) : null;
+
+  if (!userMessage) {
+    console.error("找不到对应的用户消息");
+    return;
+  }
+
+  // 获取用户发送的完整内容（含引用部分）
+  const contentToSend = userMessage.content;
+
+  // 删除当前 AI 消息
+  store.deleteMessage(aiMessageId);
+
+  // 删除对应的用户消息
+  store.deleteMessage(userMessageId);
+
+  // 前端预生成新的消息 ID
+  const newUserMessageId = store.createId();
+  const newAiMessageId = store.createId();
+
+  // 重新添加用户消息（使用预生成的 ID）
+  store.appendMessage({
+    role: "user",
+    content: contentToSend,
+    originalContent: (userMessage as any).originalContent ?? contentToSend
+  }, newUserMessageId);
+
+  // 重新发送
+  streaming.value = true;
+  store.setConnection("RECONNECTING");
+  pushAiContainer(newAiMessageId);
+  await ensureBottom();
+
+  const streamResult = await sendMessageStream(
+    {
+      content: (userMessage as any).originalContent ?? contentToSend.replace(/^> .*\n\n/, ""),  // 发送原始内容（不含引用标记）
+      visitorId: store.visitorId,
+      sessionId: store.sessionId,
+      pageContext: "training-home",
+      locale: locale.value,
+      userMessageId: newUserMessageId,
+      aiMessageId: newAiMessageId
+    },
+    {
+      onToken(token) {
+        const current = store.messages.find((item) => item.id === newAiMessageId)?.content ?? "";
+        store.patchMessage(newAiMessageId, { content: `${current}${token}` });
+        ensureBottom();
+      },
+      onCard(card) {
+        store.patchMessage(newAiMessageId, { card });
+      },
+      onSession(sessionId) {
+        if (sessionId && sessionId !== store.sessionId) {
+          store.setSessionId(sessionId);
+        }
+      },
+      onCitations(citations) {
+        store.patchMessage(newAiMessageId, { citations });
+      },
+      onDone() {
+        store.patchMessage(newAiMessageId, { pending: false, userMessageId: newUserMessageId });
+        store.setConnection("ONLINE");
+        streaming.value = false;
+      },
+      onError() {
+        store.patchMessage(newAiMessageId, { pending: false, error: "NETWORK_ERROR" });
         store.setConnection("OFFLINE");
         errorText.value = "NETWORK_ERROR";
         streaming.value = false;
@@ -433,6 +533,13 @@ onMounted(() => {
                     >
                       {{ t("useless") }}
                     </el-button>
+                    <el-button
+                      text
+                      size="small"
+                      @click="retryMessage(message.id)"
+                    >
+                      {{ t("retry") }}
+                    </el-button>
                   </div>
                   <div class="msg-actions">
                     <el-tooltip content="引用" placement="top">
@@ -448,6 +555,11 @@ onMounted(() => {
                     <el-tooltip content="删除" placement="top">
                       <el-button class="action-btn" text circle size="small" @click="handleDeleteMessage(message.id)">
                         <el-icon><Delete /></el-icon>
+                      </el-button>
+                    </el-tooltip>
+                    <el-tooltip content="重新回答" placement="top">
+                      <el-button class="action-btn" text circle size="small" @click="retryMessage(message.id)">
+                        <el-icon><RefreshRight /></el-icon>
                       </el-button>
                     </el-tooltip>
                   </div>
@@ -474,7 +586,7 @@ onMounted(() => {
                   </div>
                 </div>
                 <div v-if="message.error" class="error-actions">
-                  <el-button text type="danger" size="small" @click="sendMessage(message.content)">{{ t("retry") }}</el-button>
+                  <el-button text type="danger" size="small" @click="retryMessage(message.id)">重试</el-button>
                 </div>
               </div>
             </article>
