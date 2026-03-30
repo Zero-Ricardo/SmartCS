@@ -8,6 +8,8 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-your-internal-secret-key}
     depends_on:
       smartcs-backend:
         condition: service_healthy

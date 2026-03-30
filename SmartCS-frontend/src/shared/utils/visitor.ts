@@ -1,4 +1,4 @@
-const VISITOR_KEY = "taoke-visitor-id";
+const VISITOR_KEY = "peixunbao-visitor-id";
 
 const randomId = () => {
   const cryptoId = crypto?.randomUUID?.();

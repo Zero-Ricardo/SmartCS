@@ -5,12 +5,15 @@ import type { ChatCard } from "@/shared/types/chat";
 // 本地开发时 VITE_API_BASE_URL=http://localhost:8000
 // 生产环境 VITE_API_BASE_URL 为空，使用相对路径 /
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "";
-const INTERNAL_SECRET = (import.meta.env.VITE_INTERNAL_SECRET as string | undefined)?.trim() || "your-internal-secret-key";
+// 本地开发时可通过 VITE_INTERNAL_SECRET 传入 secret
+// 生产环境由 Nginx 自动注入 X-Internal-Secret header，前端不需要
+const INTERNAL_SECRET = (import.meta.env.VITE_INTERNAL_SECRET as string | undefined)?.trim() || "";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface SendMessageParams {
   content: string;
   visitorId: string;
+  userId: string | null;    // 外部传入的 user_id（优先），无则降级为 visitorId
   sessionId: string | null;
   pageContext: string;
   locale: AppLocale;
@@ -42,14 +45,15 @@ interface BackendSession {
 }
 
 const buildHeaders = (accept = "application/json") => {
-  if (!INTERNAL_SECRET) {
-    throw new Error("缺少 VITE_INTERNAL_SECRET 配置");
-  }
-  return {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: accept,
-    "X-Internal-Secret": INTERNAL_SECRET
   };
+  // 本地开发时需要手动带 secret，生产环境由 Nginx 注入
+  if (INTERNAL_SECRET) {
+    headers["X-Internal-Secret"] = INTERNAL_SECRET;
+  }
+  return headers;
 };
 
 const parseEventBlock = (block: string) => {
@@ -82,8 +86,9 @@ const parseEventBlock = (block: string) => {
   };
 };
 
-const resolveLatestSessionId = async (visitorId: string): Promise<string | null> => {
-  const response = await fetch(`${API_BASE_URL}/internal/chat/sessions?guest_id=${encodeURIComponent(visitorId)}`, {
+const resolveLatestSessionId = async (visitorId: string, userId: string | null): Promise<string | null> => {
+  const queryParam = userId ? `user_id=${encodeURIComponent(userId)}` : `guest_id=${encodeURIComponent(visitorId)}`;
+  const response = await fetch(`${API_BASE_URL}/internal/chat/sessions?${queryParam}`, {
     method: "GET",
     headers: buildHeaders()
   });
@@ -111,7 +116,8 @@ export const sendMessageStream = async (params: SendMessageParams, handlers: Str
       headers: buildHeaders("text/event-stream"),
       body: JSON.stringify({
         query: params.content,
-        guest_id: params.visitorId,
+        user_id: params.userId || undefined,
+        guest_id: params.userId ? undefined : params.visitorId,
         session_id: requestSessionId,
         user_message_id: params.userMessageId,
         ai_message_id: params.aiMessageId
@@ -177,7 +183,7 @@ export const sendMessageStream = async (params: SendMessageParams, handlers: Str
       handlers.onDone();
     }
 
-    const resolvedSessionId = requestSessionId ?? (await resolveLatestSessionId(params.visitorId));
+    const resolvedSessionId = requestSessionId ?? (await resolveLatestSessionId(params.visitorId, params.userId));
     return { sessionId: resolvedSessionId } satisfies StreamResult;
   } catch {
     handlers.onError();
