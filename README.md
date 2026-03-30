@@ -107,6 +107,9 @@ docker-compose up -d --build
 # 查看日志
 docker-compose logs -f
 
+# 从创建集合到生成混合检索元数据到自动化测试评估效果一体化脚本
+docker exec -it smartcs-backend uv run python scripts/eval_retrieval.py
+
 # 运行数据库迁移
 docker-compose exec smartcs-backend uv run alembic upgrade head
 ```
