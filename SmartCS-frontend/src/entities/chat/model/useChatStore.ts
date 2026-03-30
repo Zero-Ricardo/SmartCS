@@ -4,12 +4,28 @@ import dayjs from "dayjs";
 import type { ChatMessage, ChatSnapshot, ConnectionState, ServiceMode } from "@/shared/types/chat";
 import { ensureVisitorId } from "@/shared/utils/visitor";
 
-const STORAGE_KEY = "taoke-chat-snapshot";
+const STORAGE_KEY = "peixunbao-chat-snapshot";
 
 const createId = () => crypto.randomUUID?.() ?? `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 export const useChatStore = defineStore("chat", () => {
+  // 外部传入的 user_id（来自 iframe URL 参数），优先于 visitorId
+  const userId = ref<string | null>(null);
   const visitorId = ref(ensureVisitorId());
+
+  /**
+   * 设置外部传入的 user_id
+   * 在 ChatBoxPage 初始化时从 URL query 中读取并调用
+   */
+  const setUserId = (id: string | null) => {
+    userId.value = id;
+  };
+
+  /**
+   * 获取当前有效身份标识
+   * 有 userId 时优先用 userId（对应后端 user_id），否则用 visitorId（对应后端 guest_id）
+   */
+  const effectiveId = computed(() => userId.value ?? visitorId.value);
   const sessionId = ref<string | null>(null);
   const serviceMode = ref<ServiceMode>("AI");
   const connectionState = ref<ConnectionState>("ONLINE");
@@ -130,7 +146,9 @@ export const useChatStore = defineStore("chat", () => {
   };
 
   return {
+    userId,
     visitorId,
+    effectiveId,
     sessionId,
     serviceMode,
     connectionState,
@@ -142,6 +160,7 @@ export const useChatStore = defineStore("chat", () => {
     switchMode,
     setConnection,
     setSessionId,
+    setUserId,
     restore,
     clear,
     canLoadOlder,

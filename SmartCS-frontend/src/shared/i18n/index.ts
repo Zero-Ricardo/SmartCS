@@ -2,7 +2,7 @@ import { computed, ref } from "vue";
 import type { AppLocale } from "@/shared/i18n/messages";
 import { i18nMessages } from "@/shared/i18n/messages";
 
-const LOCALE_KEY = "taoke-locale";
+const LOCALE_KEY = "peixunbao-locale";
 const fallbackLocale: AppLocale = "zh-CN";
 
 const detectLocale = (): AppLocale => {

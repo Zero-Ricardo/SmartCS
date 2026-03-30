@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { ChatDotRound, Close, Download, MagicStick, Upload, UserFilled, Delete, DocumentCopy, ChatSquare, Link, TopRight, RefreshRight } from "@element-plus/icons-vue";
-import { useClipboard, useNetwork, useDraggable } from "@vueuse/core";
+import { useClipboard, useNetwork, useDraggable, useWindowSize } from "@vueuse/core";
 import dayjs from "dayjs";
 import { useChatStore } from "@/entities/chat/model/useChatStore";
 import { useI18n } from "@/shared/i18n";
@@ -10,17 +10,20 @@ import { sendMessageStream } from "@/shared/api/chatApi";
 import type { ChatMessage } from "@/shared/types/chat";
 import { toRichHtml } from "@/shared/utils/richText";
 
+const { embedded } = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
 const store = useChatStore();
 const { t, locale, setLocale } = useI18n();
 const { copy } = useClipboard();
 const { isOnline } = useNetwork();
 
-const opened = ref(false);
+const opened = ref(embedded);
 const input = ref("");
 const streaming = ref(false);
 const errorText = ref("");
 const messageListRef = ref<HTMLElement>();
 const preloadHistory = ref<ChatMessage[]>([]);
+const { width, height } = useWindowSize();
+const panelHeight = ref(760);
 
 const workTime = computed(() => {
   const hour = dayjs().hour();
@@ -28,7 +31,7 @@ const workTime = computed(() => {
 });
 
 const statusText = computed(() => (workTime.value ? t("aiServiceOn") : t("aiServiceOff")));
-const quickPrompts = computed(() => [t("prompt1"), t("prompt2"), t("prompt3"), t("prompt4")]);
+const quickPrompts = computed(() => [t("prompt1"), t("prompt2"), t("prompt3")]);
 
 const connectionLabel = computed(() => {
   if (!isOnline.value || store.connectionState === "OFFLINE") {
@@ -67,6 +70,7 @@ const ensureBottom = async () => {
 
 const openWidget = async () => {
   opened.value = true;
+  panelHeight.value = clampPanelHeight(panelHeight.value);
   await ensureBottom();
 };
 
@@ -122,6 +126,7 @@ const sendMessage = async (preset?: string) => {
     {
       content,
       visitorId: store.visitorId,
+      userId: store.userId,
       sessionId: store.sessionId,
       pageContext: "training-home",
       locale: locale.value,
@@ -207,6 +212,7 @@ const retryMessage = async (aiMessageId: string) => {
     {
       content: (userMessage as any).originalContent ?? contentToSend.replace(/^> .*\n\n/, ""),  // 发送原始内容（不含引用标记）
       visitorId: store.visitorId,
+      userId: store.userId,
       sessionId: store.sessionId,
       pageContext: "training-home",
       locale: locale.value,
@@ -396,6 +402,21 @@ const renderMessage = (content: string) => toRichHtml(content);
 
 const chatPanelRef = ref<HTMLElement | null>(null);
 const chatHeaderRef = ref<HTMLElement | null>(null);
+const isCompactView = computed(() => width.value <= 1024);
+const isTabletLandscape = computed(() => width.value >= 1024 && width.value <= 1366 && height.value >= 700 && width.value > height.value);
+const headerCursor = computed(() => (isCompactView.value || isTabletLandscape.value ? "default" : "move"));
+
+const panelMinHeight = computed(() => (isTabletLandscape.value ? 520 : isCompactView.value ? 360 : 560));
+const panelMaxHeight = computed(() => (isCompactView.value ? height.value - 8 : Math.max(panelMinHeight.value + 40, height.value - 20)));
+let resizeMoveHandler: ((event: PointerEvent) => void) | null = null;
+let resizeUpHandler: (() => void) | null = null;
+
+const clampPanelHeight = (height: number) => Math.max(panelMinHeight.value, Math.min(height, panelMaxHeight.value));
+
+const clampY = (top: number, height: number) => {
+  const maxTop = Math.max(8, window.innerHeight - height - 8);
+  return Math.min(Math.max(8, top), maxTop);
+};
 
 const { x, y } = useDraggable(chatPanelRef, {
   initialValue: { 
@@ -406,11 +427,64 @@ const { x, y } = useDraggable(chatPanelRef, {
 });
 
 const panelStyle = computed(() => {
+  if (isTabletLandscape.value) {
+    return {
+      left: "50%",
+      top: "50%",
+      right: "auto",
+      bottom: "auto",
+      width: "min(94vw, 1040px)",
+      height: `${panelHeight.value}px`,
+      transform: "translate(-50%, -50%)",
+      borderRadius: "16px"
+    };
+  }
+  if (isCompactView.value) {
+    return {
+      left: "0",
+      right: "0",
+      top: "0",
+      bottom: "auto",
+      width: "100vw",
+      height: "100dvh",
+      borderRadius: "0"
+    };
+  }
   return {
     left: `${x.value}px`,
     top: `${y.value}px`,
+    height: `${panelHeight.value}px`
   };
 });
+
+const startResize = (event: PointerEvent) => {
+  event.preventDefault();
+  const startY = event.clientY;
+  const initialHeight = panelHeight.value;
+  const initialTop = y.value;
+
+  const onMove = (moveEvent: PointerEvent) => {
+    const delta = startY - moveEvent.clientY;
+    const nextHeight = clampPanelHeight(initialHeight + delta);
+    panelHeight.value = nextHeight;
+    if (!isCompactView.value && !isTabletLandscape.value) {
+      const appliedDelta = nextHeight - initialHeight;
+      y.value = clampY(initialTop - appliedDelta, nextHeight);
+    }
+  };
+
+  const onUp = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    resizeMoveHandler = null;
+    resizeUpHandler = null;
+  };
+
+  resizeMoveHandler = onMove;
+  resizeUpHandler = onUp;
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+};
 
 onMounted(() => {
   const restored = store.restore();
@@ -420,22 +494,43 @@ onMounted(() => {
       content: t("aboutContent")
     });
   }
+  panelHeight.value = clampPanelHeight(panelHeight.value);
+  if (!isCompactView.value && !isTabletLandscape.value) {
+    y.value = clampY(y.value, panelHeight.value);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (resizeMoveHandler) {
+    window.removeEventListener("pointermove", resizeMoveHandler);
+    resizeMoveHandler = null;
+  }
+  if (resizeUpHandler) {
+    window.removeEventListener("pointerup", resizeUpHandler);
+    resizeUpHandler = null;
+  }
 });
 </script>
 
 <template>
-  <div class="chat-widget">
-    <button v-if="!opened" class="entry-button" @click="openWidget">{{ t("chatEntry") }}</button>
-    <section v-else ref="chatPanelRef" class="chat-panel" :style="panelStyle">
-      <header ref="chatHeaderRef" class="chat-header" style="cursor: move;">
-        <div class="title-wrap">
-          <h3>{{ t("chatTitle") }}</h3>
-          <div class="status-line">
-            <span class="status-text">{{ statusText }}</span>
-            <span class="connection-pill" :class="`variant-${connectionVariant}`">
-              <span class="connection-dot" aria-hidden="true"></span>
-              <span class="connection-text">{{ connectionLabel }}</span>
-            </span>
+  <div class="chat-widget" :class="{ 'chat-widget--embedded': embedded }">
+    <button v-if="!opened && !embedded" class="entry-button" :aria-label="t('chatEntry')" @click="openWidget">
+      <img class="entry-button-icon" src="/icon_smart.png" :alt="t('chatEntry')">
+    </button>
+    <section v-if="opened" ref="chatPanelRef" class="chat-panel" :class="{ 'chat-panel--embedded': embedded }" :style="embedded ? undefined : panelStyle">
+      <div v-if="!embedded" class="resize-handle-top" @pointerdown="startResize"></div>
+      <header ref="chatHeaderRef" class="chat-header" :style="{ cursor: headerCursor }">
+        <div class="brand-title">
+          <img class="brand-logo" src="/logo_PXB.png" alt="培训宝">
+          <div class="title-wrap">
+            <h3>{{ t("chatTitle") }}</h3>
+            <div class="status-line">
+              <span class="status-text">{{ statusText }}</span>
+              <span class="connection-pill" :class="`variant-${connectionVariant}`">
+                <span class="connection-dot" aria-hidden="true"></span>
+                <span class="connection-text">{{ connectionLabel }}</span>
+              </span>
+            </div>
           </div>
         </div>
         <div class="actions">
@@ -455,7 +550,7 @@ onMounted(() => {
             </el-icon>
             {{ modeToggleLabel }}
           </el-button>
-          <el-button class="tool-btn header-close" text circle aria-label="close" @click="closeWidget">
+          <el-button v-if="!embedded" class="tool-btn header-close" text circle aria-label="close" @click="closeWidget">
             <el-icon>
               <Close />
             </el-icon>
@@ -609,7 +704,7 @@ onMounted(() => {
             <div class="composer-row">
               <div class="toolbar">
                 <el-tooltip :content="t('toolEmoji')" placement="top">
-                  <el-popover trigger="click" width="180">
+                  <el-popover trigger="click" width="248">
                     <template #reference>
                       <el-button class="tool-btn" text circle aria-label="emoji">
                         <el-icon>
@@ -618,9 +713,16 @@ onMounted(() => {
                       </el-button>
                     </template>
                     <div class="emoji-list">
-                      <button @click="useEmoji('😀')">😀</button>
-                      <button @click="useEmoji('👍')">👍</button>
-                      <button @click="useEmoji('📚')">📚</button>
+                      <el-button
+                        v-for="emoji in ['😀', '😁', '😊', '😎', '🤝', '👏', '👍', '🔥', '✅', '📚', '💡', '🚀']"
+                        :key="emoji"
+                        class="emoji-btn"
+                        size="small"
+                        text
+                        @click="useEmoji(emoji)"
+                      >
+                        {{ emoji }}
+                      </el-button>
                     </div>
                   </el-popover>
                 </el-tooltip>
@@ -672,20 +774,20 @@ onMounted(() => {
               <div class="agent-card">
                 <div class="agent-avatar">人</div>
                 <div class="agent-meta">
-                  <p class="agent-line"><span class="agent-k">{{ t("agentName") }}</span><span class="agent-v">李晨</span></p>
-                  <p class="agent-line"><span class="agent-k">{{ t("agentNo") }}</span><span class="agent-v">CS-2048</span></p>
+                  <p class="agent-line"><span class="agent-k">{{ t("agentName") }}</span><span class="agent-v">王宁</span></p>
+                  <p class="agent-line"><span class="agent-k">{{ t("agentNo") }}</span><span class="agent-v">PXB-1024</span></p>
                 </div>
               </div>
               <div class="agent-actions">
-                <el-button size="small" @click="copyAndToast('taoke-consult')">{{ t("copyWechat") }}</el-button>
-                <el-button size="small" @click="copyAndToast('400-800-9000')">{{ t("copyPhone") }}</el-button>
+                <el-button size="small" @click="copyAndToast('peixunbao-consult')">{{ t("copyWechat") }}</el-button>
+                <el-button size="small" @click="copyAndToast('400-806-5566')">{{ t("copyPhone") }}</el-button>
                 <el-popover trigger="hover" width="220">
                   <template #reference>
                     <el-button size="small">{{ t("qrCode") }}</el-button>
                   </template>
                   <img
                     class="qr-img"
-                    src="https://dummyimage.com/180x180/ff5a00/ffffff.png&text=Taoke+CS"
+                    src="https://dummyimage.com/180x180/0fdbaa/ffffff.png&text=TrainingBao+CS"
                     :alt="t('qrCode')"
                   >
                 </el-popover>

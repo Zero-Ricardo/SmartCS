@@ -24,9 +24,7 @@ COPY . .
 # 构建参数
 # 生产环境 VITE_API_BASE_URL 为空，使用相对路径
 ARG VITE_API_BASE_URL=
-ARG VITE_INTERNAL_SECRET=your-internal-secret-key
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
-ENV VITE_INTERNAL_SECRET=${VITE_INTERNAL_SECRET}
 
 # 构建
 RUN pnpm build
@@ -40,9 +38,13 @@ RUN rm -rf /etc/nginx/conf.d/default.conf /usr/share/nginx/html/*
 # 复制构建产物
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# 复制 nginx 配置
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# 复制 nginx 配置模板（含 ${INTERNAL_SECRET} 占位符）
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+
+# 默认 secret（docker-compose 或 -e 覆盖）
+ENV INTERNAL_SECRET=your-internal-secret-key
 
 EXPOSE 80
 
-CMD ["nginx", "-g", "daemon off;"]
+# 用 envsubst 替换 nginx 模板中的环境变量，然后启动 nginx
+CMD ["/bin/sh", "-c", "envsubst '${INTERNAL_SECRET}' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"]
