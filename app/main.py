@@ -1,4 +1,10 @@
 import os
+import sys
+import asyncio
+
+# 针对 Windows 系统的异步事件循环修复
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # 禁用代理（必须在导入其他模块前设置）
 os.environ["HTTP_PROXY"] = ""
@@ -13,6 +19,8 @@ from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.api.chat import router as chat_router
 from app.api.knowledge import router as knowledge_router
+from app.api.admin_auth import router as admin_auth_router
+from app.api.admin_knowledge import router as admin_knowledge_router
 
 
 @asynccontextmanager
@@ -39,9 +47,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 注册路由
-app.include_router(chat_router)
-app.include_router(knowledge_router)
+# 注册路由（统一 /api 前缀）
+app.include_router(chat_router, prefix="/api")
+app.include_router(knowledge_router, prefix="/api")
+app.include_router(admin_auth_router, prefix="/api")
+app.include_router(admin_knowledge_router, prefix="/api")
 
 
 @app.get("/health")

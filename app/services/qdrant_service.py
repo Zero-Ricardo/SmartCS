@@ -59,6 +59,7 @@ INDEXED_FIELDS = [
     "metadata.H4",
     "metadata.H5",
     "metadata.H6",
+    "doc_id",
 ]
 
 
@@ -260,6 +261,8 @@ class QdrantService:
         documents: List[Document],
         collection_name: Optional[str] = None,
         enable_hybrid: bool = True,
+        doc_id: Optional[str] = None,
+        progress_callback: Optional[callable] = None,
     ) -> List[str]:
         """
         添加已切分的文档到向量库
@@ -268,6 +271,8 @@ class QdrantService:
             documents: 已切分的 Document 列表（由 MarkdownSemanticSplitter 生成）
             collection_name: 集合名称
             enable_hybrid: 是否生成稀疏向量（混合检索）
+            doc_id: 关联的知识库文档 ID（写入每个 Point 的 payload，方便按文档删除）
+            progress_callback: 进度回调函数 callback(current, total)
 
         Returns:
             插入的文档 ID 列表
@@ -279,47 +284,93 @@ class QdrantService:
         self.ensure_collection(collection_name, enable_hybrid)
 
         texts = [doc.page_content for doc in documents]
+        total = len(documents)
+        batch_size = 10
 
-        # 生成稠密向量
-        dense_vectors = self.get_dense_embeddings(texts)
+        all_ids = []
 
-        # 生成稀疏向量（可选）
-        sparse_vectors = []
-        if enable_hybrid and FASTEMBED_AVAILABLE:
-            sparse_vectors = self.get_sparse_embeddings(texts)
+        # 分批处理：embedding + upsert
+        for batch_start in range(0, total, batch_size):
+            batch_end = min(batch_start + batch_size, total)
+            batch_texts = texts[batch_start:batch_end]
+            batch_docs = documents[batch_start:batch_end]
 
-        # 构建点
-        ids = [str(uuid.uuid4()) for _ in documents]
-        points = []
+            # 生成稠密向量
+            dense_vectors = self.get_dense_embeddings(batch_texts)
 
-        for i, (pid, doc) in enumerate(zip(ids, documents)):
-            # 判断集合是否支持混合检索
-            if sparse_vectors and i < len(sparse_vectors):
-                # 混合模式：命名向量
-                vector = {
-                    self.DENSE_VECTOR_NAME: dense_vectors[i],
-                    self.SPARSE_VECTOR_NAME: sparse_vectors[i],
-                }
-            else:
-                # 纯向量模式
-                vector = dense_vectors[i]
+            # 生成稀疏向量（可选）
+            sparse_vectors = []
+            if enable_hybrid and FASTEMBED_AVAILABLE:
+                sparse_vectors = self.get_sparse_embeddings(batch_texts)
 
-            points.append(PointStruct(
-                id=pid,
-                vector=vector,
-                payload={
+            # 构建点
+            ids = [str(uuid.uuid4()) for _ in batch_docs]
+            points = []
+
+            for i, (pid, doc) in enumerate(zip(ids, batch_docs)):
+                # 判断集合是否支持混合检索
+                if sparse_vectors and i < len(sparse_vectors):
+                    vector = {
+                        self.DENSE_VECTOR_NAME: dense_vectors[i],
+                        self.SPARSE_VECTOR_NAME: sparse_vectors[i],
+                    }
+                else:
+                    vector = dense_vectors[i]
+
+                payload = {
                     "content": doc.page_content,
                     "metadata": doc.metadata,
-                },
-            ))
+                }
+                if doc_id:
+                    payload["doc_id"] = doc_id
 
-        # 批量插入
-        self.qdrant_client.upsert(
+                points.append(PointStruct(
+                    id=pid,
+                    vector=vector,
+                    payload=payload,
+                ))
+
+            # 批量插入
+            self.qdrant_client.upsert(
+                collection_name=collection_name,
+                points=points,
+            )
+
+            all_ids.extend(ids)
+
+            # 进度回调
+            if progress_callback:
+                progress_callback(batch_end, total)
+
+        return all_ids
+
+    def delete_by_doc_id(self, doc_id: str, collection_name: Optional[str] = None) -> None:
+        """按 doc_id 删除该文档的所有向量点"""
+        collection_name = collection_name or settings.qdrant_collection
+        if not self.collection_exists(collection_name):
+            return
+        self.qdrant_client.delete(
             collection_name=collection_name,
-            points=points,
+            points_selector=models.FilterSelector(
+                filter=Filter(
+                    must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+                )
+            ),
         )
 
-        return ids
+    def count_by_doc_id(self, doc_id: str, collection_name: Optional[str] = None) -> int:
+        """统计某个 doc_id 对应的向量点数"""
+        collection_name = collection_name or settings.qdrant_collection
+        if not self.collection_exists(collection_name):
+            return 0
+        result = self.qdrant_client.count(
+            collection_name=collection_name,
+            count_filter=Filter(
+                must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+            ),
+            exact=True,
+        )
+        return result.count
 
     def search(
         self,

@@ -4,7 +4,7 @@ import type { ChatCard } from "@/shared/types/chat";
 // 关键：使用相对路径，让 nginx 反向代理到后端
 // 本地开发时 VITE_API_BASE_URL=http://localhost:8000
 // 生产环境 VITE_API_BASE_URL 为空，使用相对路径 /
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "";
+const API_BASE_URL = ((import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || "") + "/api";
 // 本地开发时可通过 VITE_INTERNAL_SECRET 传入 secret
 // 生产环境由 Nginx 自动注入 X-Internal-Secret header，前端不需要
 const INTERNAL_SECRET = (import.meta.env.VITE_INTERNAL_SECRET as string | undefined)?.trim() || "";
