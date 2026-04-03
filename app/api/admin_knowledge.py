@@ -4,15 +4,17 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+import sqlalchemy.orm
 
 from app.core.database import get_db, async_session_factory
 from app.core.security import get_current_admin
 from app.models.admin import AdminUser, KnowledgeDocument
 from app.models.quota import AdminQuota
-from app.schemas.admin import DocumentResponse, DocumentListResponse
+from app.schemas.admin import DocumentResponse, DocumentListResponse, BatchProcessRequest, BatchProcessResponse
 from app.core.config import settings
 from app.services.text_splitter import text_splitter
 from app.services.qdrant_service import qdrant_service
+from app.services.document_parser import parse_file_to_md
 
 router = APIRouter(
     prefix="/admin/knowledge",
@@ -21,53 +23,83 @@ router = APIRouter(
 )
 
 
-# ====== 后台入库任务 ======
+# ====== 后台任务工具函数 ======
 
-def update_ingest_status(doc_id: str, current: int, total: int, status: str = "ingesting", error: str = None):
-    """同步更新入库进度（在后台线程中调用）"""
+def update_doc_status(doc_id: str, status: str, progress: int = 0, error: str = None, chunk_count: int = None):
+    """同步更新文档状态（在后台线程中调用）"""
     from sqlalchemy import create_engine, update as sa_update
     sync_url = settings.database_url.replace("postgresql+psycopg://", "postgresql+psycopg2://")
     engine = create_engine(sync_url)
 
-    progress = int((current / total) * 100) if total > 0 else 0
+    values = {
+        "status": status,
+        "ingest_progress": progress,
+        "error_message": error
+    }
+    if chunk_count is not None:
+        values["chunk_count"] = chunk_count
 
     with engine.connect() as conn:
-        stmt = sa_update(KnowledgeDocument).where(KnowledgeDocument.id == doc_id).values(
-            status=status,
-            ingest_progress=progress,
-            error_message=error
-        )
-        if status == "ingested":
-            stmt = stmt.values(chunk_count=total)
+        stmt = sa_update(KnowledgeDocument).where(KnowledgeDocument.id == doc_id).values(**values)
         conn.execute(stmt)
         conn.commit()
     engine.dispose()
 
 
-async def process_ingest_task(doc_id: str):
-    """后台任务：执行向量入库"""
+async def process_document_pipeline(doc_id: str):
+    """
+    大一统后台管线：自动决定是否需要解析 -> 执行解析 -> 自动入库
+    状态流转: uploaded -> parsing -> ingesting -> ingested
+    """
     async with async_session_factory() as db:
         doc = await db.get(KnowledgeDocument, doc_id)
-        if not doc or not doc.md_content:
+        if not doc:
             return
 
         try:
-            # 1. 切分文本
+            # === 阶段 1: 智能解析 ===
+            if doc.file_type in ["pdf", "docx"]:
+                doc.status = "parsing"
+                doc.ingest_progress = 10  # 开始解析
+                await db.commit()
+
+                # 使用轻量级本地解析（pymupdf4llm / python-docx）
+                doc.md_content = parse_file_to_md(doc.storage_path, doc.file_type)
+
+            elif doc.file_type == "txt":
+                doc.status = "parsing"
+                doc.ingest_progress = 10
+                await db.commit()
+
+                # 直接读取文本文件
+                with open(doc.storage_path, "r", encoding="utf-8") as f:
+                    doc.md_content = f.read()
+
+            # .md 文件直接跳过解析阶段
+
+            # === 阶段 2: 向量入库 ===
+            doc.status = "ingesting"
+            doc.ingest_progress = 50  # 解析完成，开始入库
+            await db.commit()
+
+            if not doc.md_content:
+                raise ValueError("文档内容为空，解析失败")
+
+            # 切分文本
             chunks = text_splitter.split_text(
                 text=doc.md_content,
                 source=doc.filename,
-                doc_title=doc.filename.replace(".md", "")
+                doc_title=doc.filename.replace(f".{doc.file_type}", "")
             )
 
             if not chunks:
-                doc.status = "failed"
-                doc.error_message = "No valid chunks after splitting"
-                await db.commit()
-                return
+                raise ValueError("切分后没有有效文本块")
 
-            # 2. 向量化并入库（带进度回调）
+            # 向量化并入库（带进度回调）
             def progress_callback(current, total):
-                update_ingest_status(doc_id, current, total)
+                # 入库阶段从 50% 到 100%
+                progress = 50 + int((current / total) * 50)
+                update_doc_status(doc_id, "ingesting", progress)
 
             qdrant_service.add_documents(
                 documents=chunks,
@@ -75,7 +107,7 @@ async def process_ingest_task(doc_id: str):
                 progress_callback=progress_callback
             )
 
-            # 3. 完成
+            # 完成
             doc.status = "ingested"
             doc.ingest_progress = 100
             doc.chunk_count = len(chunks)
@@ -83,8 +115,14 @@ async def process_ingest_task(doc_id: str):
 
         except Exception as e:
             doc.status = "failed"
-            doc.error_message = str(e)
+            doc.error_message = f"处理失败: {str(e)}"
             await db.commit()
+
+
+# 保留旧的入库任务用于兼容
+async def process_ingest_task(doc_id: str):
+    """后台任务：执行向量入库（兼容旧接口）"""
+    await process_document_pipeline(doc_id)
 
 
 # ====== API 路由 ======
@@ -132,8 +170,13 @@ async def upload_document(
         try:
             md_content = content.decode("utf-8")
             status = "parsed"
-        except Exception:
-            pass
+        except UnicodeDecodeError:
+            # 尝试 GBK 编码
+            try:
+                md_content = content.decode("gbk")
+                status = "parsed"
+            except Exception:
+                raise HTTPException(status_code=400, detail="Markdown 文件编码无法识别，请使用 UTF-8 编码")
 
     # 创建记录
     new_doc = KnowledgeDocument(
@@ -178,6 +221,7 @@ async def list_documents(
         .order_by(KnowledgeDocument.created_at.desc())
         .offset(skip)
         .limit(limit)
+        .options(sqlalchemy.orm.defer(KnowledgeDocument.md_content))
     )
     result = await db.execute(query)
     documents = result.scalars().all()
@@ -205,6 +249,87 @@ async def get_document_detail(
     return doc
 
 
+@router.post("/documents/{doc_id}/process")
+async def trigger_process(
+    doc_id: str,
+    background_tasks: BackgroundTasks,
+    current_admin: AdminUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    启动自动化处理管线
+    一键完成：解析(PDF/DOCX/TXT) -> 切分 -> 向量化入库
+    """
+    query = select(KnowledgeDocument).where(
+        KnowledgeDocument.id == doc_id,
+        KnowledgeDocument.admin_user_id == current_admin.id
+    )
+    result = await db.execute(query)
+    doc = result.scalar_one_or_none()
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    if doc.status in ["parsing", "ingesting"]:
+        raise HTTPException(status_code=400, detail="文档正在处理中，请勿重复提交")
+
+    # 更新状态为处理中
+    doc.status = "parsing" if doc.file_type in ["pdf", "docx", "txt"] else "ingesting"
+    doc.ingest_progress = 0
+    doc.error_message = None
+    await db.commit()
+
+    # 启动大一统管线
+    background_tasks.add_task(process_document_pipeline, doc_id)
+
+    return {"message": "处理管线已启动"}
+
+
+@router.post("/documents/batch-process", response_model=BatchProcessResponse)
+async def batch_process_documents(
+    request: BatchProcessRequest,
+    background_tasks: BackgroundTasks,
+    current_admin: AdminUser = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    批量启动文档处理管线
+    一键完成：解析(PDF/DOCX/TXT) -> 切分 -> 向量化入库
+    """
+    if not request.doc_ids:
+        raise HTTPException(status_code=400, detail="文档ID列表不能为空")
+
+    # 查询文档并验证归属
+    query = select(KnowledgeDocument).where(
+        KnowledgeDocument.id.in_(request.doc_ids),
+        KnowledgeDocument.admin_user_id == current_admin.id
+    )
+    result = await db.execute(query)
+    docs = result.scalars().all()
+
+    if not docs:
+        raise HTTPException(status_code=404, detail="未找到任何文档")
+
+    # 过滤出可处理的文档（uploaded/parsed/failed 状态）
+    processable = [d for d in docs if d.status in ["uploaded", "parsed", "failed"]]
+    skipped_count = len(docs) - len(processable)
+
+    # 依次启动后台任务
+    for doc in processable:
+        doc.status = "parsing" if doc.file_type in ["pdf", "docx", "txt"] else "ingesting"
+        doc.ingest_progress = 0
+        doc.error_message = None
+        background_tasks.add_task(process_document_pipeline, doc.id)
+
+    await db.commit()
+
+    return BatchProcessResponse(
+        message=f"已启动 {len(processable)} 个处理任务",
+        processed_count=len(processable),
+        skipped_count=skipped_count
+    )
+
+
 @router.post("/documents/{doc_id}/ingest")
 async def trigger_ingest(
     doc_id: str,
@@ -212,7 +337,7 @@ async def trigger_ingest(
     current_admin: AdminUser = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
-    """手动触发向量入库"""
+    """手动触发向量入库（兼容旧接口，已解析的文档直接入库）"""
     query = select(KnowledgeDocument).where(
         KnowledgeDocument.id == doc_id,
         KnowledgeDocument.admin_user_id == current_admin.id
@@ -224,7 +349,7 @@ async def trigger_ingest(
         raise HTTPException(status_code=404, detail="Document not found")
 
     if not doc.md_content:
-        raise HTTPException(status_code=400, detail="Document has no markdown content to ingest")
+        raise HTTPException(status_code=400, detail="Document has no markdown content to ingest, please use /process for auto-parse")
 
     if doc.status == "ingesting":
         raise HTTPException(status_code=400, detail="Already ingesting")
@@ -235,7 +360,7 @@ async def trigger_ingest(
     await db.commit()
 
     # 加入后台任务
-    background_tasks.add_task(process_ingest_task, doc_id)
+    background_tasks.add_task(process_document_pipeline, doc_id)
 
     return {"message": "Ingest task started"}
 

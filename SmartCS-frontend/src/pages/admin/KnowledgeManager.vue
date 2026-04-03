@@ -3,10 +3,12 @@ import { ref, onMounted, onUnmounted, computed } from "vue";
 import {
   listDocuments,
   uploadDocument,
+  triggerProcess,
   triggerIngest,
   deleteVectors,
   deleteDocument,
   getDocument,
+  batchProcessDocuments,
   type KnowledgeDocument,
 } from "@/shared/api/adminApi";
 import { ElMessage, ElMessageBox } from "element-plus";
@@ -17,6 +19,7 @@ const page = ref(1);
 const pageSize = ref(20);
 const loading = ref(false);
 const uploading = ref(false);
+const selectedDocs = ref<KnowledgeDocument[]>([]);  // 选中的文档
 
 // 进度轮询
 const pollingIds = ref<Set<string>>(new Set());
@@ -33,7 +36,7 @@ const fetchDocuments = async () => {
     // 检查哪些需要轮询进度
     pollingIds.value.clear();
     for (const doc of res.documents) {
-      if (doc.status === "ingesting") {
+      if (["parsing", "ingesting"].includes(doc.status)) {
         pollingIds.value.add(doc.id);
       }
     }
@@ -62,12 +65,12 @@ const pollProgress = async () => {
       if (idx !== -1) {
         documents.value[idx] = updated;
       }
-      if (updated.status !== "ingesting") {
+      if (updated.status !== "parsing" && updated.status !== "ingesting") {
         pollingIds.value.delete(docId);
         if (updated.status === "ingested") {
-          ElMessage.success(`${updated.filename} 入库完成`);
+          ElMessage.success(`${updated.filename} 处理完成`);
         } else if (updated.status === "failed") {
-          ElMessage.error(`${updated.filename} 入库失败: ${updated.error_message}`);
+          ElMessage.error(`${updated.filename} 处理失败: ${updated.error_message}`);
         }
       }
     } catch {
@@ -91,17 +94,51 @@ const handleUpload = async (options: { file: File }) => {
   }
 };
 
-// 入库
-const handleIngest = async (doc: KnowledgeDocument) => {
+// 一键处理（解析+入库）
+const handleProcess = async (doc: KnowledgeDocument) => {
   try {
-    await triggerIngest(doc.id);
-    ElMessage.success("入库任务已启动");
-    doc.status = "ingesting";
+    await triggerProcess(doc.id);
+    ElMessage.success("自动化处理管线已启动");
+    // MD 文件跳过解析直接入库，其他需要解析
+    doc.status = doc.file_type === "md" ? "ingesting" : "parsing";
     doc.ingest_progress = 0;
     pollingIds.value.add(doc.id);
     updatePolling();
   } catch (e: any) {
-    ElMessage.error(e.message || "入库失败");
+    ElMessage.error(e.message || "启动失败");
+  }
+};
+
+// 表格选择变化
+const handleSelectionChange = (selection: KnowledgeDocument[]) => {
+  selectedDocs.value = selection;
+};
+
+// 批量处理
+const handleBatchProcess = async () => {
+  // 只处理 uploaded/parsed/failed 状态的文档
+  const toProcess = selectedDocs.value.filter(
+    doc => ['uploaded', 'parsed', 'failed'].includes(doc.status)
+  );
+
+  if (toProcess.length === 0) {
+    ElMessage.warning("没有可处理的文档（仅支持待处理/待入库/失败状态）");
+    return;
+  }
+
+  try {
+    const result = await batchProcessDocuments(toProcess.map(d => d.id));
+    ElMessage.success(result.message);
+
+    // 将这些文档加入轮询
+    for (const doc of toProcess) {
+      doc.status = doc.file_type === "md" ? "ingesting" : "parsing";
+      doc.ingest_progress = 0;
+      pollingIds.value.add(doc.id);
+    }
+    updatePolling();
+  } catch (e: any) {
+    ElMessage.error(e.message || "批量处理失败");
   }
 };
 
@@ -145,11 +182,12 @@ const formatSize = (bytes: number) => {
 };
 
 const statusMap: Record<string, { label: string; type: string }> = {
-  uploaded: { label: "已上传", type: "info" },
-  parsed: { label: "已解析", type: "warning" },
+  uploaded: { label: "待处理", type: "info" },
+  parsing: { label: "正在解析", type: "warning" },
+  parsed: { label: "待入库", type: "warning" },
   ingesting: { label: "入库中", type: "" },
   ingested: { label: "已入库", type: "success" },
-  failed: { label: "失败", type: "danger" },
+  failed: { label: "处理失败", type: "danger" },
 };
 
 onMounted(fetchDocuments);
@@ -162,16 +200,27 @@ onUnmounted(() => {
   <div class="knowledge-manager">
     <div class="km-header">
       <h3>知识库文档管理</h3>
-      <el-upload
-        :http-request="handleUpload as any"
-        :show-file-list="false"
-        accept=".md,.pdf,.docx,.txt"
-      >
-        <el-button type="primary" :loading="uploading">上传文档</el-button>
-      </el-upload>
+      <div class="km-header-actions">
+        <el-button
+          type="success"
+          :disabled="selectedDocs.length === 0"
+          @click="handleBatchProcess"
+        >
+          批量处理 ({{ selectedDocs.length }})
+        </el-button>
+        <el-upload
+          :http-request="handleUpload as any"
+          :show-file-list="false"
+          accept=".md,.pdf,.docx,.txt"
+          multiple
+        >
+          <el-button type="primary" :loading="uploading">上传文档</el-button>
+        </el-upload>
+      </div>
     </div>
 
-    <el-table :data="documents" v-loading="loading" stripe class="km-table">
+    <el-table :data="documents" v-loading="loading" stripe class="km-table" @selection-change="handleSelectionChange">
+      <el-table-column type="selection" width="50" />
       <el-table-column prop="filename" label="文件名" min-width="200" show-overflow-tooltip />
       <el-table-column prop="file_type" label="类型" width="80" align="center" />
       <el-table-column label="大小" width="100" align="right">
@@ -196,13 +245,13 @@ onUnmounted(() => {
       <el-table-column label="操作" width="220" align="center" fixed="right">
         <template #default="{ row }">
           <el-button
-            v-if="row.status === 'parsed' || row.status === 'failed'"
+            v-if="['uploaded', 'parsed', 'failed'].includes(row.status)"
             type="primary"
             text
             size="small"
-            @click="handleIngest(row)"
+            @click="handleProcess(row)"
           >
-            入库
+            处理
           </el-button>
           <el-button
             v-if="row.status === 'ingested'"
@@ -256,6 +305,11 @@ onUnmounted(() => {
   margin: 0;
   font-size: 18px;
   color: var(--color-text-1);
+}
+
+.km-header-actions {
+  display: flex;
+  gap: 12px;
 }
 
 .km-table {

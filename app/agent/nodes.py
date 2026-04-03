@@ -1,9 +1,32 @@
 """
 LangGraph 节点函数
 """
-from typing import Dict, Any
+from typing import Dict, Any, List
 from app.core.config import settings
 from app.services.llm_service import llm_service
+
+
+def deduplicate_citations(docs: List[Dict]) -> List[Dict]:
+    """
+    按父文档去重，保留每个文档分数最高的片段
+
+    Args:
+        docs: 检索结果列表，每个元素包含 content, metadata, score
+
+    Returns:
+        去重后的列表，每个父文档只保留一个片段
+    """
+    seen_sources = {}
+    for doc in docs:
+        # 优先用 metadata.source，其次用 doc_id
+        source = doc.get("metadata", {}).get("source") if doc.get("metadata") else None
+        if source is None:
+            source = doc.get("doc_id", "unknown")
+
+        if source not in seen_sources or doc.get("score", 0) > seen_sources[source].get("score", 0):
+            seen_sources[source] = doc
+
+    return list(seen_sources.values())
 
 
 # RAG 场景的生成提示词（严格基于参考资料）
@@ -84,11 +107,12 @@ async def analyze_node(state: Dict[str, Any]) -> Dict[str, Any]:
 async def retrieve_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     向量检索节点（异步）
+    召回更多片段，后续在 generate_node 中按父文档去重
     """
     from app.services.qdrant_service import qdrant_service
 
     query = state.get("rewritten_query", state.get("query", ""))
-    top_k = state.get("top_k", 3)
+    top_k = state.get("top_k", 10)  # 召回更多片段，后续去重
 
     try:
         docs = await qdrant_service.asearch(query, top_k=top_k)
@@ -114,8 +138,8 @@ async def generate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     context_docs = state.get("context_docs", [])
     intent = state.get("intent", "direct_answer")
 
-    # 构建上下文
-    context = "\n\n".join([doc["content"] for doc in context_docs])
+    # 构建上下文（用于 LLM 生成，最多用 5 个片段）
+    context = "\n\n".join([doc["content"] for doc in context_docs[:5]])
 
     # 构建 system prompt
     if intent == "need_rag" and context_docs:
@@ -142,10 +166,15 @@ async def generate_node(state: Dict[str, Any]) -> Dict[str, Any]:
             full_response += content
             streamed_chunks.append(chunk)
 
-    # 构建引用
+    # 构建引用（按父文档去重）
+    unique_docs = deduplicate_citations(context_docs)
     citations = [
-        {"content": doc["content"], "score": doc["score"]}
-        for doc in context_docs
+        {
+            "content": doc["content"][:200] + "..." if len(doc["content"]) > 200 else doc["content"],
+            "score": doc.get("score", 0),
+            "source": doc.get("metadata", {}).get("source") if doc.get("metadata") else None,
+        }
+        for doc in unique_docs[:5]  # 最多显示 5 个引用
     ]
 
     return {

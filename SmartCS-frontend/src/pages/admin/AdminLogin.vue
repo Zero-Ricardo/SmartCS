@@ -8,12 +8,12 @@ const router = useRouter();
 const isLogin = ref(true);
 const loading = ref(false);
 
-const loginForm = reactive({ email: "", password: "" });
-const registerForm = reactive({ email: "", password: "", company_name: "" });
+const loginForm = reactive({ username: "", password: "" });
+const registerForm = reactive({ username: "", password: "", confirm_password: "" });
 
 const handleLogin = async () => {
-  if (!loginForm.email || !loginForm.password) {
-    ElMessage.warning("请输入邮箱和密码");
+  if (!loginForm.username || !loginForm.password) {
+    ElMessage.warning("请输入用户名和密码");
     return;
   }
   loading.value = true;
@@ -30,8 +30,12 @@ const handleLogin = async () => {
 };
 
 const handleRegister = async () => {
-  if (!registerForm.email || !registerForm.password) {
-    ElMessage.warning("请输入邮箱和密码");
+  if (!registerForm.username || !registerForm.password) {
+    ElMessage.warning("请输入用户名和密码");
+    return;
+  }
+  if (registerForm.password !== registerForm.confirm_password) {
+    ElMessage.warning("两次密码不一致");
     return;
   }
   loading.value = true;
@@ -39,7 +43,7 @@ const handleRegister = async () => {
     await register(registerForm);
     ElMessage.success("注册成功，请登录");
     isLogin.value = true;
-    loginForm.email = registerForm.email;
+    loginForm.username = registerForm.username;
     loginForm.password = "";
   } catch (e: any) {
     ElMessage.error(e.message || "注册失败");
@@ -62,10 +66,10 @@ const handleRegister = async () => {
           <el-form @submit.prevent="handleLogin">
             <el-form-item>
               <el-input
-                v-model="loginForm.email"
-                placeholder="邮箱"
+                v-model="loginForm.username"
+                placeholder="用户名"
                 size="large"
-                prefix-icon="Message"
+                prefix-icon="User"
               />
             </el-form-item>
             <el-form-item>
@@ -95,10 +99,10 @@ const handleRegister = async () => {
           <el-form @submit.prevent="handleRegister">
             <el-form-item>
               <el-input
-                v-model="registerForm.email"
-                placeholder="邮箱"
+                v-model="registerForm.username"
+                placeholder="用户名"
                 size="large"
-                prefix-icon="Message"
+                prefix-icon="User"
               />
             </el-form-item>
             <el-form-item>
@@ -113,10 +117,12 @@ const handleRegister = async () => {
             </el-form-item>
             <el-form-item>
               <el-input
-                v-model="registerForm.company_name"
-                placeholder="公司名称（选填）"
+                v-model="registerForm.confirm_password"
+                type="password"
+                placeholder="确认密码"
                 size="large"
-                prefix-icon="OfficeBuilding"
+                prefix-icon="Lock"
+                show-password
               />
             </el-form-item>
             <el-button

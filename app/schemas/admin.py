@@ -1,18 +1,25 @@
 from datetime import datetime
-from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List
+from pydantic import BaseModel, Field, field_validator
 
 
 class AdminRegisterRequest(BaseModel):
     """管理员注册请求"""
-    email: EmailStr = Field(..., description="电子邮箱")
+    username: str = Field(..., min_length=2, max_length=50, description="用户名")
     password: str = Field(..., min_length=6, description="密码")
-    company_name: Optional[str] = Field(None, description="公司名称")
+    confirm_password: str = Field(..., min_length=6, description="确认密码")
+
+    @field_validator('confirm_password')
+    @classmethod
+    def passwords_match(cls, v, info):
+        if 'password' in info.data and v != info.data['password']:
+            raise ValueError('两次密码不一致')
+        return v
 
 
 class AdminLoginRequest(BaseModel):
     """管理员登录请求"""
-    email: EmailStr = Field(..., description="电子邮箱")
+    username: str = Field(..., description="用户名")
     password: str = Field(..., description="密码")
 
 
@@ -25,7 +32,7 @@ class TokenResponse(BaseModel):
 class AdminMeResponse(BaseModel):
     """管理员信息响应"""
     id: str
-    email: str
+    username: str
     company_name: Optional[str] = None
     role: str
     created_at: datetime
@@ -55,4 +62,16 @@ class DocumentListResponse(BaseModel):
     """文档列表响应"""
     total: int
     documents: list[DocumentResponse]
+
+
+class BatchProcessRequest(BaseModel):
+    """批量处理请求"""
+    doc_ids: List[str] = Field(..., description="文档ID列表")
+
+
+class BatchProcessResponse(BaseModel):
+    """批量处理响应"""
+    message: str
+    processed_count: int
+    skipped_count: int
 

@@ -30,18 +30,24 @@ router = APIRouter(
 @router.post("/register", response_model=AdminMeResponse)
 async def register(request: AdminRegisterRequest, db: AsyncSession = Depends(get_db)):
     """管理员注册"""
-    # 检查邮箱是否已存在
-    result = await db.execute(select(AdminUser).where(AdminUser.email == request.email))
+    # 验证两次密码一致
+    if request.password != request.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="两次密码不一致"
+        )
+
+    # 检查用户名是否已存在
+    result = await db.execute(select(AdminUser).where(AdminUser.username == request.username))
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail="用户名已被占用"
         )
 
     new_admin = AdminUser(
-        email=request.email,
-        password_hash=get_password_hash(request.password),
-        company_name=request.company_name
+        username=request.username,
+        password_hash=get_password_hash(request.password)
     )
 
     # 为新用户创建默认配额
@@ -56,13 +62,13 @@ async def register(request: AdminRegisterRequest, db: AsyncSession = Depends(get
 @router.post("/login", response_model=TokenResponse)
 async def login(request: AdminLoginRequest, db: AsyncSession = Depends(get_db)):
     """管理员登录"""
-    result = await db.execute(select(AdminUser).where(AdminUser.email == request.email))
+    result = await db.execute(select(AdminUser).where(AdminUser.username == request.username))
     admin = result.scalar_one_or_none()
 
     if not admin or not verify_password(request.password, admin.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="用户名或密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
 

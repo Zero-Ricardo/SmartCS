@@ -16,7 +16,7 @@ class AdminUser(Base):
         primary_key=True,
         default=lambda: str(uuid.uuid4())
     )
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     company_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(20), default="admin")
@@ -39,7 +39,7 @@ class AdminUser(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<AdminUser {self.email}>"
+        return f"<AdminUser {self.username}>"
 
 
 class KnowledgeDocument(Base):

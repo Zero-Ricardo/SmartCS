@@ -25,14 +25,14 @@ const authHeaders = (): Record<string, string> => {
 // ====== 认证接口 ======
 
 export interface LoginRequest {
-  email: string;
+  username: string;
   password: string;
 }
 
 export interface RegisterRequest {
-  email: string;
+  username: string;
   password: string;
-  company_name?: string;
+  confirm_password: string;
 }
 
 export interface TokenResponse {
@@ -42,7 +42,7 @@ export interface TokenResponse {
 
 export interface AdminUser {
   id: string;
-  email: string;
+  username: string;
   company_name: string | null;
   role: string;
   created_at: string;
@@ -138,6 +138,25 @@ export const uploadDocument = async (file: File): Promise<KnowledgeDocument> => 
   return res.json();
 };
 
+/**
+ * 启动自动化处理管线（一键解析+入库）
+ * 适用于 PDF/DOCX/TXT 等需要解析的文件
+ */
+export const triggerProcess = async (docId: string): Promise<void> => {
+  const res = await fetch(`${API_BASE_URL}/admin/knowledge/documents/${docId}/process`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "处理失败" }));
+    throw new Error(err.detail || "处理失败");
+  }
+};
+
+/**
+ * 手动触发向量入库（兼容旧接口）
+ * 适用于已解析的 Markdown 文件
+ */
 export const triggerIngest = async (docId: string): Promise<void> => {
   const res = await fetch(`${API_BASE_URL}/admin/knowledge/documents/${docId}/ingest`, {
     method: "POST",
@@ -163,4 +182,25 @@ export const deleteDocument = async (docId: string): Promise<void> => {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error("删除文档失败");
+};
+
+/**
+ * 批量处理文档（一键入库）
+ * @param docIds 文档ID列表
+ */
+export const batchProcessDocuments = async (docIds: string[]): Promise<{
+  message: string;
+  processed_count: number;
+  skipped_count: number;
+}> => {
+  const res = await fetch(`${API_BASE_URL}/admin/knowledge/documents/batch-process`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ doc_ids: docIds }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "批量处理失败" }));
+    throw new Error(err.detail || "批量处理失败");
+  }
+  return res.json();
 };
