@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     qdrant_port: int = 6333
     qdrant_collection: str = "pxb"  # 向量数据集合名称
 
+    # JWT 认证配置
+    jwt_secret_key: str = "smartcs-super-secret-key-2026"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 1440  # 24小时
+
+    # 文件上传配置
+    upload_dir: str = "./uploads"
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

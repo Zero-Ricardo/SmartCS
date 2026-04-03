@@ -312,10 +312,6 @@ const onScroll = () => {
 };
 
 const transferHuman = () => {
-  if (!workTime.value) {
-    ElMessage.info(t("transferDisabled"));
-    return;
-  }
   store.switchMode("HUMAN");
   ElMessage.success(t("transferHuman"));
 };
@@ -330,7 +326,7 @@ const toggleServiceMode = () => {
 };
 
 const modeToggleLabel = computed(() => (store.serviceMode === "AI" ? t("transferHuman") : t("backToAi")));
-const modeToggleDisabled = computed(() => store.serviceMode === "AI" && !workTime.value);
+const modeToggleDisabled = computed(() => false);
 
 const roleLabel = (role: ChatMessage["role"]) => {
   if (role === "user") {
@@ -755,16 +751,6 @@ onBeforeUnmount(() => {
               </template>
               <p class="side-text">{{ t("aboutContent") }}</p>
             </el-card>
-            <el-card class="side-card" shadow="never">
-              <template #header>
-                <span class="side-title">{{ t("faqTitle") }}</span>
-              </template>
-              <ul class="side-list">
-                <li>{{ t("faq1") }}</li>
-                <li>{{ t("faq2") }}</li>
-                <li>{{ t("faq3") }}</li>
-              </ul>
-            </el-card>
           </template>
           <template v-else>
             <el-card class="side-card" shadow="never">
@@ -772,23 +758,22 @@ onBeforeUnmount(() => {
                 <span class="side-title">{{ t("agentCard") }}</span>
               </template>
               <div class="agent-card">
-                <div class="agent-avatar">人</div>
+                <div class="agent-avatar">培</div>
                 <div class="agent-meta">
-                  <p class="agent-line"><span class="agent-k">{{ t("agentName") }}</span><span class="agent-v">王宁</span></p>
-                  <p class="agent-line"><span class="agent-k">{{ t("agentNo") }}</span><span class="agent-v">PXB-1024</span></p>
+                  <p class="agent-line"><span class="agent-k">{{ t("agentName") }}</span><span class="agent-v">小培老师</span></p>
+                  <p class="agent-line"><span class="agent-k">{{ t("agentNo") }}</span><span class="agent-v">400 9219 082</span></p>
                 </div>
               </div>
               <div class="agent-actions">
-                <el-button size="small" @click="copyAndToast('peixunbao-consult')">{{ t("copyWechat") }}</el-button>
-                <el-button size="small" @click="copyAndToast('400-806-5566')">{{ t("copyPhone") }}</el-button>
+                <el-button size="small" @click="copyAndToast('400 9219 082')">{{ t("copyPhone") }}</el-button>
                 <el-popover trigger="hover" width="220">
                   <template #reference>
                     <el-button size="small">{{ t("qrCode") }}</el-button>
                   </template>
                   <img
                     class="qr-img"
-                    src="https://dummyimage.com/180x180/0fdbaa/ffffff.png&text=TrainingBao+CS"
-                    :alt="t('qrCode')"
+                    src="/qr_wechat_work.png"
+                    alt="企业微信二维码"
                   >
                 </el-popover>
               </div>

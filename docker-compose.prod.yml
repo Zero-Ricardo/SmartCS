@@ -1,4 +1,24 @@
 services:
+  # ---- Caddy: SSL 终止和反向代理 ----
+  caddy:
+    image: caddy:2-alpine
+    container_name: smartcs-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./taoke.com.pem:/etc/caddy/taoke.com.pem:ro
+      - ./taoke.com.key:/etc/caddy/taoke.com.key:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - smartcs-frontend
+      - smartcs-backend
+    networks:
+      - smartcs-network
+
   # ---- 前端：Nginx 静态服务 ----
   smartcs-frontend:
     build:
@@ -6,8 +26,9 @@ services:
       dockerfile: Dockerfile
     container_name: smartcs-frontend
     restart: unless-stopped
-    ports:
-      - "3000:80"
+    # 不暴露端口到宿主机，只通过 Caddy 访问
+    expose:
+      - "80"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET:-your-internal-secret-key}
     depends_on:
@@ -23,6 +44,9 @@ services:
       dockerfile: Dockerfile
     container_name: smartcs-backend
     restart: unless-stopped
+    # 不暴露端口到宿主机，只通过 Caddy 访问
+    expose:
+      - "8000"
     environment:
       - DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/smartcs
       - QDRANT_HOST=qdrant
@@ -52,10 +76,11 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: smartcs
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # 不暴露端口到宿主机
+    expose:
+      - "5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -69,9 +94,10 @@ services:
     image: qdrant/qdrant:latest
     container_name: smartcs-qdrant
     restart: unless-stopped
-    ports:
-      - "6333:6333"
-      - "6334:6334"
+    # 不暴露端口到宿主机
+    expose:
+      - "6333"
+      - "6334"
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
@@ -84,4 +110,6 @@ networks:
 volumes:
   postgres_data:
   qdrant_data:
+  caddy_data:
+  caddy_config:
   uploads_data:

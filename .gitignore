@@ -156,3 +156,10 @@ logs/
 # 缓存
 .cache/
 .temp/
+
+#
+数据结构说明.md
+CLAUDE.md
+*.png
+*.zip
+*.md

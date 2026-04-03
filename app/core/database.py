@@ -36,6 +36,10 @@ async def close_db():
     await engine.dispose()
 
 
+# 别名，供 admin_knowledge 后台任务使用
+async_session_factory = async_session_maker
+
+
 async def get_db() -> AsyncSession:
     """获取数据库会话依赖"""
     async with async_session_maker() as session:

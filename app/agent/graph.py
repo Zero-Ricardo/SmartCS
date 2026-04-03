@@ -4,7 +4,7 @@ LangGraph 图定义
 """
 from typing import AsyncGenerator, Dict, Any
 
-from app.agent.nodes import analyze_node, retrieve_node, generate_node
+from app.agent.nodes import analyze_node, retrieve_node, generate_node, deduplicate_citations
 
 
 def should_retrieve(state: Dict[str, Any]) -> str:
@@ -106,13 +106,14 @@ async def stream_agent(
     context_docs = []
     if intent == "need_rag":
         try:
-            context_docs = await qdrant_service.asearch(rewritten_query, top_k=3)
+            # 召回更多片段（top_k=10），后续按父文档去重
+            context_docs = await qdrant_service.asearch(rewritten_query, top_k=10)
         except Exception:
             context_docs = []
 
     # 4. 构建生成 prompt（使用完整 query，包含引用部分）
     # 5. 构建消息历史（暂时禁用，方便后续加回）
-    context = "\n\n".join([doc["content"] for doc in context_docs])
+    context = "\n\n".join([doc["content"] for doc in context_docs[:5]])
 
     if intent == "need_rag" and context_docs:
         system_prompt = RAG_GENERATE_PROMPT.format(
@@ -138,15 +139,16 @@ async def stream_agent(
             content = chunk[6:]
             yield {"type": "chunk", "content": content}
 
-    # 7. 输出引用信息（包含来源链接）
+    # 7. 输出引用信息（按父文档去重）
     if context_docs:
+        unique_docs = deduplicate_citations(context_docs)
         citations = [
             {
                 "source": doc.get("metadata", {}).get("source", ""),
                 "doc_title": doc.get("metadata", {}).get("doc_title", ""),
                 "score": doc.get("score", 0),
             }
-            for doc in context_docs
+            for doc in unique_docs[:5]
         ]
         yield {"type": "citations", "citations": citations}
 

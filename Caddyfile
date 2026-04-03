@@ -1,0 +1,30 @@
+# Caddyfile - 生产环境配置
+# 使用你自己的 SSL 证书
+
+{
+    # 自动 HTTPS 重定向（HTTP -> HTTPS）
+    auto_https off
+}
+
+# HTTP 重定向到 HTTPS
+:80 {
+    redir https://{host}{uri} permanent
+}
+
+# HTTPS 前端服务
+:443 {
+    # 使用你自己的证书
+    tls /etc/caddy/taoke.com.pem /etc/caddy/taoke.com.key
+
+    # 前端静态文件服务
+    reverse_proxy smartcs-frontend:80
+}
+
+# HTTPS API 服务（可选：单独子域名或路径）
+:8443 {
+    # 使用你自己的证书
+    tls /etc/caddy/taoke.com.pem /etc/caddy/taoke.com.key
+
+    # 后端 API 服务
+    reverse_proxy smartcs-backend:8000
+}
