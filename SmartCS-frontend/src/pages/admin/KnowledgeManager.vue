@@ -74,7 +74,12 @@ const pollProgress = async () => {
         }
       }
     } catch {
-      // 忽略单次轮询失败
+      // 404 或其他错误：从轮询列表中移除，避免无限重试
+      pollingIds.value.delete(docId);
+      const idx = documents.value.findIndex((d) => d.id === docId);
+      if (idx !== -1) {
+        documents.value.splice(idx, 1);
+      }
     }
   }
   updatePolling();

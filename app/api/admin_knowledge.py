@@ -114,6 +114,8 @@ async def process_document_pipeline(doc_id: str):
             await db.commit()
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             doc.status = "failed"
             doc.error_message = f"处理失败: {str(e)}"
             await db.commit()

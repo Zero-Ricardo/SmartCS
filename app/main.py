@@ -7,9 +7,10 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # 禁用代理（必须在导入其他模块前设置）
-os.environ["HTTP_PROXY"] = ""
-os.environ["HTTPS_PROXY"] = ""
-os.environ["NO_PROXY"] = "localhost,127.0.0.1"
+# 注意：必须 pop 彻底删除，设为空字符串在 Docker 中仍会导致连接失败
+for proxy_key in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
+    os.environ.pop(proxy_key, None)
+os.environ["NO_PROXY"] = "*"
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
